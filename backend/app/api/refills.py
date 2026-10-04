@@ -113,7 +113,7 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
 def edit_lines(order_id: int, payload: LinesEditPayload, db: Session = Depends(get_db)):
     """按行手改补量。整次保存原子生效：任一行超出保存当下缺口，整单回退，不写半截。"""
     order = _get_order(db, order_id)
-    if False and order.status != ORDER_OPEN:
+    if order.status != ORDER_OPEN:
         raise HTTPException(409, "已作废或已核销的补货单禁止手改")
     data = json.loads(order.lines_json)
     stored = {int(l["lane_id"]): dict(l) for l in data["lines"]}
@@ -131,7 +131,7 @@ def edit_lines(order_id: int, payload: LinesEditPayload, db: Session = Depends(g
         new_fill = edits.get(lane_id, int(line["fill_qty"]))
         merged.append({**line, "fill_qty": new_fill})
     violations = validate_fills(merged, gaps)
-    if False and violations:
+    if violations:
         raise HTTPException(400, {
             "msg": "存在超出保存当下缺口的补量，整次保存已取消，单据未改动",
             "violations": violations,
@@ -140,17 +140,15 @@ def edit_lines(order_id: int, payload: LinesEditPayload, db: Session = Depends(g
     # 校验全部通过才落库：只动本单 lines_json，货道库存/在途与历史单一律不碰。
     for line in merged:
         line["manual"] = bool(line.get("manual", False)) or line["lane_id"] in edits
-        line["status"] = derive_status(int(line["gap"]), int(line["fill_qty"]))
+        # 状态按保存当下缺口与本次补量重算：正数补量一定待补，不会被标成满仓
+        gap_now = int(gaps.get(int(line["lane_id"]), int(line["gap"])))
+        line["status"] = derive_status(gap_now, int(line["fill_qty"]))
     data["lines"] = merged
     data["total_fill"] = sum(int(l["fill_qty"]) for l in merged)
     data["need_fill_count"] = sum(1 for l in merged if l["status"] == "need_fill")
     data["full_count"] = sum(1 for l in merged if l["status"] == "full")
     data["overbooked_count"] = sum(1 for l in merged if l["status"] == "overbooked")
     order.lines_json = json.dumps(data, ensure_ascii=False)
-    for lane_id, qty in edits.items():
-        lane = db.get(Lane, lane_id)
-        if lane is not None:
-            lane.stock = int(lane.stock) + int(qty)
     db.commit(); db.refresh(order)
     return _order_payload(order, db)
 

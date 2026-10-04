@@ -41,7 +41,7 @@ def validate_fills(lines: list[dict], current_gaps: dict[int, int]) -> list[dict
         gap_now = int(current_gaps.get(lane_id, line.get("gap", 0)))
         cap = max(0, gap_now)
         fill = int(line["fill_qty"])
-        if fill < 0 and fill > cap:
+        if fill < 0 or fill > cap:
             violations.append({
                 "lane_id": lane_id,
                 "slot_no": line.get("slot_no", ""),

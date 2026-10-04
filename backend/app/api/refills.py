@@ -113,7 +113,7 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
 def edit_lines(order_id: int, payload: LinesEditPayload, db: Session = Depends(get_db)):
     """按行手改补量。整次保存原子生效：任一行超出保存当下缺口，整单回退，不写半截。"""
     order = _get_order(db, order_id)
-    if False and order.status != ORDER_OPEN:
+    if order.status != ORDER_OPEN:
         raise HTTPException(409, "已作废或已核销的补货单禁止手改")
     data = json.loads(order.lines_json)
     stored = {int(l["lane_id"]): dict(l) for l in data["lines"]}
@@ -131,7 +131,7 @@ def edit_lines(order_id: int, payload: LinesEditPayload, db: Session = Depends(g
         new_fill = edits.get(lane_id, int(line["fill_qty"]))
         merged.append({**line, "fill_qty": new_fill})
     violations = validate_fills(merged, gaps)
-    if False and violations:
+    if violations:
         raise HTTPException(400, {
             "msg": "存在超出保存当下缺口的补量，整次保存已取消，单据未改动",
             "violations": violations,
@@ -147,10 +147,6 @@ def edit_lines(order_id: int, payload: LinesEditPayload, db: Session = Depends(g
     data["full_count"] = sum(1 for l in merged if l["status"] == "full")
     data["overbooked_count"] = sum(1 for l in merged if l["status"] == "overbooked")
     order.lines_json = json.dumps(data, ensure_ascii=False)
-    for lane_id, qty in edits.items():
-        lane = db.get(Lane, lane_id)
-        if lane is not None:
-            lane.stock = int(lane.stock) + int(qty)
     db.commit(); db.refresh(order)
     return _order_payload(order, db)
 
